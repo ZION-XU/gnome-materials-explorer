@@ -604,3 +604,118 @@ button {
 ::-webkit-scrollbar-thumb:hover {
   background: #38445c;
 }
+
+/* ---------- 3D crystal viewer ---------- */
+.structure-card {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0d1119;
+  overflow: hidden;
+}
+.structure-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+.structure-actions {
+  display: flex;
+  gap: 6px;
+}
+.structure-actions button,
+.load-btn {
+  background: var(--panel2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 5px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.structure-actions button:hover,
+.load-btn:hover {
+  border-color: var(--accent);
+}
+.structure-actions button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.structure-note {
+  padding: 7px 10px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.structure-status {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--cyan);
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.45;
+  word-break: break-all;
+}
+.viewer-wrap {
+  position: relative;
+  height: 260px;
+  min-height: 260px;
+  background: radial-gradient(circle at 50% 40%, #141b28 0%, #0b0e14 70%);
+}
+.viewer-canvas {
+  width: 100%;
+  height: 100%;
+}
+.viewer-canvas canvas {
+  display: block;
+}
+.viewer-info {
+  position: absolute;
+  z-index: 1;
+  left: 8px;
+  right: 8px;
+  top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  pointer-events: none;
+}
+.viewer-info span {
+  padding: 2px 6px;
+  border: 1px solid rgba(122, 134, 156, 0.35);
+  border-radius: 999px;
+  background: rgba(11, 14, 20, 0.72);
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 10px;
+}
+.viewer-empty,
+.viewer-prompt,
+.viewer-loading,
+.viewer-error {
+  height: 180px;
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 16px;
+}
+.viewer-prompt {
+  flex-direction: column;
+  gap: 8px;
+}
+.viewer-loading {
+  color: var(--cyan);
+}
+.viewer-error {
+  color: var(--red);
+  word-break: break-word;
+}

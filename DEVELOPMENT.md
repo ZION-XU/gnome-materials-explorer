@@ -19,10 +19,11 @@
 └─────────────────────────────────────────────┘
         │
    data/gnome/materials.parquet (30 MB)
+   data/gnome/by_id.zip          (可选，CIF 结构包)
 ```
 
 - **数据层**：DuckDB 在进程内打开 in-memory DB，以 `VIEW` 挂载 Parquet 文件。55 万行筛选毫秒级。
-- **核心层**：Rust（`src-tauri/src/lib.rs`），暴露 4 个 Tauri command。
+- **核心层**：Rust（`src-tauri/src/lib.rs`），暴露 5 个 Tauri command。
 - **前端**：React 19 + Vite 8 + TypeScript，无 UI 框架，自写深色样式。
 
 ## 目录结构
@@ -31,7 +32,8 @@
 20260629-GNoME/
 ├── data/gnome/
 │   ├── stable_materials_summary.csv   # 原始数据 (151 MB, 不入库)
-│   └── materials.parquet              # 预处理后产物 (30 MB)
+│   ├── materials.parquet              # 预处理后产物 (30 MB)
+│   └── by_id.zip                      # 可选：按 MaterialId 索引的 CIF 结构包，不入库
 ├── scripts/
 │   └── preprocess.py                  # CSV → Parquet
 ├── frontend/
@@ -47,6 +49,7 @@
 │   │       ├── FilterPanel.tsx
 │   │       ├── ResultTable.tsx
 │   │       ├── DetailPanel.tsx
+│   │       ├── CrystalViewer.tsx       # Three.js 结构预览
 │   │       └── StatsBar.tsx
 │   ├── src-tauri/
 │   │   ├── Cargo.toml                 # 含 duckdb (bundled) 依赖
@@ -81,6 +84,7 @@ Parquet schema 列：`material_id, composition, reduced_formula, elements, n_sit
 | `count_materials` | `filter: Filter` | `i64` | 同条件总数（不受 limit 影响） |
 | `get_material` | `materialId: string` | `MaterialRow \| null` | 单条详情 |
 | `stats` | — | `Stats` | 全量概览：带隙分布、晶系/维度分布 |
+| `get_structure` | `materialId: string` | `Structure` | 从 `by_id.zip` 读取并解析 CIF，返回晶胞、原子分数坐标和原始 CIF |
 
 **Filter 字段**（camelCase）：
 `includeElements`（必须全部包含）、`includeAnyElements`（含任一）、`excludeElements`（排除）、`bandgapMin/Max`、`isMetal`、`decompMax`、`formationMax`、`densityMin/Max`、`crystalSystems`、`dimensionalities`、`limit`、`offset`
@@ -123,6 +127,12 @@ pnpm tauri build
 3. `../data/gnome/materials.parquet`
 4. `../../data/gnome/materials.parquet`
 
+3D 结构包 `by_id.zip` 查找顺序：
+1. 环境变量 `GNOME_ZIP`
+2. `data/gnome/by_id.zip`
+3. `../data/gnome/by_id.zip`
+4. `../../data/gnome/by_id.zip`
+
 ## 应用预设
 
 | 预设 | 条件 |
@@ -138,14 +148,15 @@ pnpm tauri build
 
 ## 已知限制（MVP）
 
-1. **无 3D 晶体结构渲染**：CSV 中 `Data Directory` 是 GCS 路径（`gs://crystal-design/...`），本地无 CIF 文件。详情面板仅显示结构路径。3D 渲染需额外下载结构文件（v2）。
-2. **导出范围**：仅导出当前查询返回的行（limit ≤ 1000），不是全量结果集。
-3. **元素选择**：一个元素不能同时处于"包含/任一/排除"多个列表（互斥）。
-4. **带隙筛选**：`bandgapMin` 会排除金属（`bandgap IS NULL`）。筛金属用"金属导体"预设或 `isMetal=true`。
+1. **3D 结构依赖本地结构包**：缺少 `by_id.zip` 时 `get_structure` 会返回提示，但筛选/详情/导出 CSV JSON 不受影响。
+2. **结构预览为快速预览**：当前用 CIF 原始坐标渲染球棍模型和晶胞框，`symmetryApplied=false`；键连线按距离阈值推断，不能替代严谨结构分析。
+3. **导出范围**：仅导出当前查询返回的行（limit ≤ 1000），不是全量结果集。
+4. **元素选择**：一个元素不能同时处于"包含/任一/排除"多个列表（互斥）。
+5. **带隙筛选**：`bandgapMin` 会排除金属（`bandgap IS NULL`）。筛金属用"金属导体"预设或 `isMetal=true`。
 
 ## 后续路线
 
-- **v1.1**：3D 晶体结构渲染（Three.js），支持从 GNoME HuggingFace 仓库按需下载 CIF。
+- **v1.1**：批量结构下载/校验、结构缓存状态提示、按元素半径/价键规则优化键连线。
 - **v1.2**：导出 VASP / Quantum ESPRESSO 输入文件模板。
 - **v1.3**：相对 MP/OQMD 的新颖度标注（数据已含 `Decomposition Energy Per Atom MP/OQMD` 对照列，预处理时可保留）。
 - **v2**：地壳丰度/毒性白名单过滤、用户保存的筛选画像、批量结构下载。

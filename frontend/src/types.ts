@@ -54,6 +54,33 @@ export interface Stats {
   byDimension: [string, number][];
 }
 
+export interface AtomSite {
+  element: string;
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface Structure {
+  materialId: string;
+  a: number;
+  b: number;
+  c: number;
+  alpha: number;
+  beta: number;
+  gamma: number;
+  spaceGroupNumber: number | null;
+  spaceGroupName: string | null;
+  atoms: AtomSite[];
+  symmetryApplied: boolean;
+  rawCif: string;
+}
+
+export interface ExportedFile {
+  filename: string;
+  path: string;
+}
+
 export const emptyFilter = (): Filter => ({
   includeElements: [],
   includeAnyElements: [],

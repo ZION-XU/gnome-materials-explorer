@@ -1,6 +1,7 @@
-# 数据文件（体积大，不入库；由 scripts/preprocess.py 生成）
+# 数据文件（体积大，不入库；由 scripts/preprocess.py 生成或手动下载）
 data/gnome/*.csv
 data/gnome/*.parquet
+data/gnome/*.zip
 
 # 依赖与构建产物
 frontend/node_modules/
