@@ -1,7 +1,7 @@
 // GNoME Materials Explorer — Rust 核心层
 //
 // 在进程内打开 in-memory DuckDB, 以 VIEW 形式挂载 Parquet 文件。
-// 对前端暴露 5 个 Tauri command: 查询 / 计数 / 详情 / 概览统计 / CIF 结构读取。
+// 对前端暴露 Tauri command: 查询 / 计数 / 详情 / 概览统计 / 结构读取与模拟输入导出。
 // 用户输入的离散值(元素符号、晶系、维度)经白名单校验后内联, 数值用绑定参数。
 
 use std::sync::Mutex;
@@ -39,6 +39,16 @@ const VALID_DIM: &[&str] = &[
     "intercalated molecule",
 ];
 
+const VALID_BATTERY_FAMILY: &[&str] = &[
+    "li_thiophosphate",
+    "li_halide",
+    "li_nasicon",
+    "li_garnet",
+    "na_thiophosphate",
+    "na_nasicon",
+    "na_halide",
+];
+
 const SELECT_COLS: &str = "material_id, reduced_formula, composition, \
      to_json(elements)::VARCHAR AS elements, bandgap, is_metal, \
      formation_energy_per_atom, decomposition_energy_per_atom, density, volume, \
@@ -70,6 +80,7 @@ pub struct Filter {
     pub density_max: Option<f64>,
     pub crystal_systems: Vec<String>,
     pub dimensionalities: Vec<String>,
+    pub battery_families: Vec<String>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
 }
@@ -142,6 +153,33 @@ fn whitelist_in(vals: &[String], allowed: &[&str]) -> Result<String, String> {
     Ok(out.join(","))
 }
 
+fn battery_family_clause(family: &str) -> Result<&'static str, String> {
+    match family {
+        "li_thiophosphate" => Ok(
+            "(list_has_all(elements, ARRAY['Li','P']::VARCHAR[]) AND list_has_any(elements, ARRAY['S','Se']::VARCHAR[]))",
+        ),
+        "li_halide" => Ok(
+            "(list_has_any(elements, ARRAY['Li']::VARCHAR[]) AND list_has_any(elements, ARRAY['F','Cl','Br','I']::VARCHAR[]) AND NOT list_has_any(elements, ARRAY['O','S','Se']::VARCHAR[]))",
+        ),
+        "li_nasicon" => Ok(
+            "(list_has_all(elements, ARRAY['Li','P','O']::VARCHAR[]) AND list_has_any(elements, ARRAY['Ti','Zr','Ge','Si','Al','Hf','Sn','Nb','Ta']::VARCHAR[]))",
+        ),
+        "li_garnet" => Ok(
+            "(list_has_all(elements, ARRAY['Li','La','O']::VARCHAR[]) AND list_has_any(elements, ARRAY['Zr','Ta','Nb','Sn','Hf']::VARCHAR[]))",
+        ),
+        "na_thiophosphate" => Ok(
+            "(list_has_all(elements, ARRAY['Na','P']::VARCHAR[]) AND list_has_any(elements, ARRAY['S','Se']::VARCHAR[]))",
+        ),
+        "na_nasicon" => Ok(
+            "(list_has_all(elements, ARRAY['Na','P','O']::VARCHAR[]) AND list_has_any(elements, ARRAY['Ti','Zr','Ge','Si','V','Al','Hf','Sn','Nb','Ta']::VARCHAR[]))",
+        ),
+        "na_halide" => Ok(
+            "(list_has_any(elements, ARRAY['Na']::VARCHAR[]) AND list_has_any(elements, ARRAY['F','Cl','Br','I']::VARCHAR[]) AND NOT list_has_any(elements, ARRAY['O','S','Se']::VARCHAR[]))",
+        ),
+        _ => Err(format!("invalid battery family: {family}")),
+    }
+}
+
 /// 依据 Filter 构造 WHERE 子句与绑定参数。离散分类值内联, 数值用 ? 占位。
 fn build_where(f: &Filter) -> Result<(String, Vec<Box<dyn ToSql>>), String> {
     let mut clauses: Vec<String> = vec!["1=1".into()];
@@ -194,6 +232,19 @@ fn build_where(f: &Filter) -> Result<(String, Vec<Box<dyn ToSql>>), String> {
     if !f.dimensionalities.is_empty() {
         let list = whitelist_in(&f.dimensionalities, VALID_DIM)?;
         clauses.push(format!("dimensionality IN ({list})"));
+    }
+    if !f.battery_families.is_empty() {
+        for family in &f.battery_families {
+            if !VALID_BATTERY_FAMILY.iter().any(|x| *x == family.as_str()) {
+                return Err(format!("invalid battery family: {family}"));
+            }
+        }
+        let family_clauses: Result<Vec<_>, _> = f
+            .battery_families
+            .iter()
+            .map(|family| battery_family_clause(family))
+            .collect();
+        clauses.push(format!("({})", family_clauses?.join(" OR ")));
     }
     Ok((clauses.join(" AND "), params))
 }
@@ -600,6 +651,131 @@ fn read_cif_text(material_id: &str, state: &AppState) -> Result<String, String> 
     Ok(text)
 }
 
+fn lattice_vectors(s: &Structure) -> ([f64; 3], [f64; 3], [f64; 3]) {
+    let alpha = s.alpha.to_radians();
+    let beta = s.beta.to_radians();
+    let gamma = s.gamma.to_radians();
+    let cos_alpha = alpha.cos();
+    let cos_beta = beta.cos();
+    let cos_gamma = gamma.cos();
+    let sin_gamma = gamma.sin().max(1e-12);
+    let a = [s.a, 0.0, 0.0];
+    let b = [s.b * cos_gamma, s.b * sin_gamma, 0.0];
+    let cx = s.c * cos_beta;
+    let cy = s.c * (cos_alpha - cos_beta * cos_gamma) / sin_gamma;
+    let cz = (s.c * s.c - cx * cx - cy * cy).max(0.0).sqrt();
+    (a, b, [cx, cy, cz])
+}
+
+fn element_order_and_counts(atoms: &[AtomSite]) -> (Vec<String>, Vec<usize>) {
+    let mut order: Vec<String> = Vec::new();
+    let mut counts: Vec<usize> = Vec::new();
+    for atom in atoms {
+        if let Some(idx) = order.iter().position(|el| el == &atom.element) {
+            counts[idx] += 1;
+        } else {
+            order.push(atom.element.clone());
+            counts.push(1);
+        }
+    }
+    (order, counts)
+}
+
+fn generate_poscar(structure: &Structure) -> String {
+    let (a, b, c) = lattice_vectors(structure);
+    let (elements, counts) = element_order_and_counts(&structure.atoms);
+    let mut out = String::new();
+    out.push_str(&format!(
+        "GNoME {} generated by GNoME Materials Explorer\n",
+        structure.material_id
+    ));
+    out.push_str("1.0\n");
+    for v in [a, b, c] {
+        out.push_str(&format!(
+            "  {:>16.10} {:>16.10} {:>16.10}\n",
+            v[0], v[1], v[2]
+        ));
+    }
+    out.push_str(&format!("{}\n", elements.join(" ")));
+    out.push_str(&format!(
+        "{}\n",
+        counts
+            .iter()
+            .map(|count| count.to_string())
+            .collect::<Vec<_>>()
+            .join(" ")
+    ));
+    out.push_str("Direct\n");
+    for element in &elements {
+        for atom in structure
+            .atoms
+            .iter()
+            .filter(|atom| &atom.element == element)
+        {
+            out.push_str(&format!(
+                "  {:>14.10} {:>14.10} {:>14.10}\n",
+                atom.x, atom.y, atom.z
+            ));
+        }
+    }
+    out
+}
+
+fn generate_qe_input(structure: &Structure) -> String {
+    let (a, b, c) = lattice_vectors(structure);
+    let (elements, _) = element_order_and_counts(&structure.atoms);
+    let mut out = String::new();
+    out.push_str("&CONTROL\n");
+    out.push_str("  calculation = 'scf'\n");
+    out.push_str(&format!("  prefix = '{}'\n", structure.material_id));
+    out.push_str("  pseudo_dir = './pseudo'\n");
+    out.push_str("  outdir = './tmp'\n");
+    out.push_str("/\n&SYSTEM\n");
+    out.push_str("  ibrav = 0\n");
+    out.push_str(&format!("  nat = {}\n", structure.atoms.len()));
+    out.push_str(&format!("  ntyp = {}\n", elements.len()));
+    out.push_str("  ecutwfc = 50\n");
+    out.push_str("  occupations = 'smearing'\n");
+    out.push_str("  smearing = 'mv'\n");
+    out.push_str("  degauss = 0.01\n");
+    out.push_str("/\n&ELECTRONS\n");
+    out.push_str("  conv_thr = 1.0d-8\n");
+    out.push_str("/\nATOMIC_SPECIES\n");
+    for element in &elements {
+        out.push_str(&format!("  {element}  1.0  {element}.UPF\n"));
+    }
+    out.push_str("CELL_PARAMETERS angstrom\n");
+    for v in [a, b, c] {
+        out.push_str(&format!(
+            "  {:>16.10} {:>16.10} {:>16.10}\n",
+            v[0], v[1], v[2]
+        ));
+    }
+    out.push_str("ATOMIC_POSITIONS crystal\n");
+    for atom in &structure.atoms {
+        out.push_str(&format!(
+            "  {:<3} {:>14.10} {:>14.10} {:>14.10}\n",
+            atom.element, atom.x, atom.y, atom.z
+        ));
+    }
+    out.push_str("K_POINTS automatic\n");
+    out.push_str("  4 4 4 0 0 0\n");
+    out
+}
+
+fn write_download_file(filename: &str, text: String) -> Result<ExportedFile, String> {
+    let dir = dirs::download_dir()
+        .or_else(|| std::env::current_dir().ok())
+        .ok_or("无法确定导出目录")?;
+    std::fs::create_dir_all(&dir).map_err(|e| format!("创建导出目录失败: {e}"))?;
+    let path = dir.join(filename);
+    std::fs::write(&path, text).map_err(|e| format!("写入文件失败: {e}"))?;
+    Ok(ExportedFile {
+        filename: filename.to_string(),
+        path: path.to_string_lossy().to_string(),
+    })
+}
+
 #[tauri::command]
 fn get_structure(
     material_id: String,
@@ -621,17 +797,39 @@ fn export_cif(
         return Err(format!("无效的 MaterialId: {material_id}"));
     }
     let text = read_cif_text(&material_id, state.inner())?;
-    let filename = format!("{material_id}.cif");
-    let dir = dirs::download_dir()
-        .or_else(|| std::env::current_dir().ok())
-        .ok_or("无法确定导出目录")?;
-    std::fs::create_dir_all(&dir).map_err(|e| format!("创建导出目录失败: {e}"))?;
-    let path = dir.join(&filename);
-    std::fs::write(&path, text).map_err(|e| format!("写入 CIF 失败: {e}"))?;
-    Ok(ExportedFile {
-        filename,
-        path: path.to_string_lossy().to_string(),
-    })
+    write_download_file(&format!("{material_id}.cif"), text)
+}
+
+#[tauri::command]
+fn export_poscar(
+    material_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ExportedFile, String> {
+    if !valid_material_id(&material_id) {
+        return Err(format!("无效的 MaterialId: {material_id}"));
+    }
+    let text = read_cif_text(&material_id, state.inner())?;
+    let structure = parse_cif(&material_id, &text)?;
+    write_download_file(
+        &format!("{material_id}.POSCAR"),
+        generate_poscar(&structure),
+    )
+}
+
+#[tauri::command]
+fn export_qe_input(
+    material_id: String,
+    state: tauri::State<'_, AppState>,
+) -> Result<ExportedFile, String> {
+    if !valid_material_id(&material_id) {
+        return Err(format!("无效的 MaterialId: {material_id}"));
+    }
+    let text = read_cif_text(&material_id, state.inner())?;
+    let structure = parse_cif(&material_id, &text)?;
+    write_download_file(
+        &format!("{material_id}.qe.in"),
+        generate_qe_input(&structure),
+    )
 }
 
 /// 查找 materials.parquet: 环境变量优先, 再尝试若干相对路径。
@@ -713,6 +911,54 @@ loop_
         assert!(!valid_material_id("../bcc7a64ee3"));
         assert!(!valid_material_id(""));
     }
+
+    #[test]
+    fn generates_poscar_and_qe_input_from_structure() {
+        let structure = Structure {
+            material_id: "abc123".to_string(),
+            a: 3.0,
+            b: 4.0,
+            c: 5.0,
+            alpha: 90.0,
+            beta: 90.0,
+            gamma: 90.0,
+            space_group_number: Some(1),
+            space_group_name: Some("P 1".to_string()),
+            atoms: vec![
+                AtomSite {
+                    element: "Li".to_string(),
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                AtomSite {
+                    element: "P".to_string(),
+                    x: 0.5,
+                    y: 0.5,
+                    z: 0.5,
+                },
+                AtomSite {
+                    element: "S".to_string(),
+                    x: 0.25,
+                    y: 0.25,
+                    z: 0.25,
+                },
+            ],
+            symmetry_applied: false,
+            raw_cif: String::new(),
+        };
+
+        let poscar = generate_poscar(&structure);
+        assert!(poscar.contains("GNoME abc123"));
+        assert!(poscar.contains("Li P S"));
+        assert!(poscar.contains("Direct"));
+
+        let qe = generate_qe_input(&structure);
+        assert!(qe.contains("nat = 3"));
+        assert!(qe.contains("ntyp = 3"));
+        assert!(qe.contains("CELL_PARAMETERS angstrom"));
+        assert!(qe.contains("ATOMIC_POSITIONS crystal"));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -744,7 +990,9 @@ pub fn run() {
             get_material,
             stats,
             get_structure,
-            export_cif
+            export_cif,
+            export_poscar,
+            export_qe_input
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

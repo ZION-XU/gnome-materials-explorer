@@ -367,6 +367,15 @@ button {
 .chk input {
   accent-color: var(--accent);
 }
+.family-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.family-chk {
+  align-items: flex-start;
+  line-height: 1.35;
+}
 
 .fp-actions {
   display: flex;
@@ -506,6 +515,33 @@ button {
 .elems {
   color: var(--muted);
   font-size: 11px;
+}
+.battery-cell {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.score-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 38px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+.score-high {
+  color: #062015;
+  background: var(--green);
+}
+.score-medium {
+  color: #221600;
+  background: var(--amber);
+}
+.score-low {
+  color: #270b0b;
+  background: var(--red);
 }
 
 /* ---------- Detail panel ---------- */
@@ -660,6 +696,44 @@ button {
   font-size: 10px;
   line-height: 1.45;
   word-break: break-all;
+}
+.battery-card {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0d1119;
+  padding: 10px;
+}
+.battery-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.battery-families {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.battery-tag {
+  padding: 3px 7px;
+  border: 1px solid rgba(91, 140, 255, 0.5);
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(91, 140, 255, 0.1);
+  font-size: 11px;
+}
+.battery-reasons {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.55;
 }
 .viewer-wrap {
   position: relative;

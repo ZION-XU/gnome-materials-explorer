@@ -1,5 +1,6 @@
 import type { Filter } from "../types";
 import { PRESETS } from "../presets";
+import { BATTERY_FAMILIES } from "../battery";
 import { PeriodicTable } from "./PeriodicTable";
 
 type ElementMode = "include" | "any" | "exclude";
@@ -211,6 +212,26 @@ export function FilterPanel({
             value={filter.densityMax}
             onChange={(v) => onChange({ densityMax: v })}
           />
+        </div>
+      </section>
+
+      <section className="fp-section">
+        <h4>固态电池候选族</h4>
+        <div className="family-grid">
+          {BATTERY_FAMILIES.map((family) => (
+            <label key={family.id} className="chk family-chk" title={family.desc}>
+              <input
+                type="checkbox"
+                checked={filter.batteryFamilies.includes(family.id)}
+                onChange={(e) =>
+                  onChange({
+                    batteryFamilies: toggleArr(filter.batteryFamilies, family.id, e.target.checked),
+                  })
+                }
+              />
+              <span>{family.name}</span>
+            </label>
+          ))}
         </div>
       </section>
 

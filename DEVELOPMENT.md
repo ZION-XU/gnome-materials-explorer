@@ -2,7 +2,7 @@
 
 基于 Google DeepMind GNoME 数据集（554,219 条 AI 发现的稳定无机材料）的本地材料筛选桌面应用。
 
-填补的空缺：GNoME 原始数据仅以 151MB CSV + GCS 结构桶形式发布，没有任何可用的浏览/筛选/可视化层。本应用把数据预处理为列式 Parquet，提供元素周期表筛选、带隙/稳定性/密度多维过滤、应用预设、结果导出，全部在本地运行。
+填补的空缺：GNoME 原始数据仅以 151MB CSV + GCS 结构桶形式发布，没有任何可用的浏览/筛选/可视化层。本应用把数据预处理为列式 Parquet，提供元素周期表筛选、带隙/稳定性/密度多维过滤、固态电池候选族筛选、应用预设、结构预览与模拟输入导出，全部在本地运行。
 
 ## 架构
 
@@ -23,7 +23,7 @@
 ```
 
 - **数据层**：DuckDB 在进程内打开 in-memory DB，以 `VIEW` 挂载 Parquet 文件。55 万行筛选毫秒级。
-- **核心层**：Rust（`src-tauri/src/lib.rs`），暴露 5 个 Tauri command。
+- **核心层**：Rust（`src-tauri/src/lib.rs`），暴露查询、统计、结构读取、CIF/POSCAR/QE 导出等 Tauri command。
 - **前端**：React 19 + Vite 8 + TypeScript，无 UI 框架，自写深色样式。
 
 ## 目录结构
@@ -85,9 +85,12 @@ Parquet schema 列：`material_id, composition, reduced_formula, elements, n_sit
 | `get_material` | `materialId: string` | `MaterialRow \| null` | 单条详情 |
 | `stats` | — | `Stats` | 全量概览：带隙分布、晶系/维度分布 |
 | `get_structure` | `materialId: string` | `Structure` | 从 `by_id.zip` 读取并解析 CIF，返回晶胞、原子分数坐标和原始 CIF |
+| `export_cif` | `materialId: string` | `ExportedFile` | 导出原始 CIF 到系统下载目录 |
+| `export_poscar` | `materialId: string` | `ExportedFile` | 从 CIF 生成 VASP POSCAR 模板并导出 |
+| `export_qe_input` | `materialId: string` | `ExportedFile` | 从 CIF 生成 Quantum ESPRESSO SCF 输入模板并导出 |
 
 **Filter 字段**（camelCase）：
-`includeElements`（必须全部包含）、`includeAnyElements`（含任一）、`excludeElements`（排除）、`bandgapMin/Max`、`isMetal`、`decompMax`、`formationMax`、`densityMin/Max`、`crystalSystems`、`dimensionalities`、`limit`、`offset`
+`includeElements`（必须全部包含）、`includeAnyElements`（含任一）、`excludeElements`（排除）、`bandgapMin/Max`、`isMetal`、`decompMax`、`formationMax`、`densityMin/Max`、`crystalSystems`、`dimensionalities`、`batteryFamilies`、`limit`、`offset`
 
 **安全**：元素符号、晶系、维度等离散值经 Rust 端白名单校验后内联 SQL；数值用 `?` 绑定参数，避免注入。
 
@@ -143,6 +146,8 @@ pnpm tauri build
 | 稀土功能材料 | 含任一稀土 · 稳定 |
 | 宽禁带绝缘体 | 带隙 3–6 eV · 非金属 |
 | 金属导体 | 带隙为 0（金属） |
+| 固态电解质候选 | Li/Na 硫化物、卤化物、NASICON、石榴石族 · 非金属 · 分解能 ≤ 0.1 eV |
+| 锂硫化物/锂卤化物/Li NASICON/锂石榴石/Na NASICON | 对应 `batteryFamilies` 族筛选 · 非金属 · 分解能 ≤ 0.1 eV |
 
 > `decompMax = 0.1 eV/atom` 是"距凸包足够近、可能可合成"的经验阈值。
 
@@ -150,13 +155,14 @@ pnpm tauri build
 
 1. **3D 结构依赖本地结构包**：缺少 `by_id.zip` 时 `get_structure` 会返回提示，但筛选/详情/导出 CSV JSON 不受影响。
 2. **结构预览为快速预览**：当前用 CIF 原始坐标渲染球棍模型和晶胞框，`symmetryApplied=false`；键连线按距离阈值推断，不能替代严谨结构分析。
-3. **导出范围**：仅导出当前查询返回的行（limit ≤ 1000），不是全量结果集。
-4. **元素选择**：一个元素不能同时处于"包含/任一/排除"多个列表（互斥）。
-5. **带隙筛选**：`bandgapMin` 会排除金属（`bandgap IS NULL`）。筛金属用"金属导体"预设或 `isMetal=true`。
+3. **模拟输入模板需人工复核**：POSCAR/QE 输入由 CIF 晶胞和分数坐标生成；赝势、截断能、K 点、磁性、价态、超胞和 NEB/MD 设置需要后续按体系手工调整。
+4. **导出范围**：仅导出当前查询返回的行（limit ≤ 1000），不是全量结果集。
+5. **元素选择**：一个元素不能同时处于"包含/任一/排除"多个列表（互斥）。
+6. **带隙筛选**：`bandgapMin` 会排除金属（`bandgap IS NULL`）。筛金属用"金属导体"预设或 `isMetal=true`。
 
 ## 后续路线
 
 - **v1.1**：批量结构下载/校验、结构缓存状态提示、按元素半径/价键规则优化键连线。
-- **v1.2**：导出 VASP / Quantum ESPRESSO 输入文件模板。
+- **v1.2**：批量导出 CIF/POSCAR/QE，增加 NEB/MD 工作流参数向导。
 - **v1.3**：相对 MP/OQMD 的新颖度标注（数据已含 `Decomposition Energy Per Atom MP/OQMD` 对照列，预处理时可保留）。
 - **v2**：地壳丰度/毒性白名单过滤、用户保存的筛选画像、批量结构下载。

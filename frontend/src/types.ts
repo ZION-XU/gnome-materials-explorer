@@ -13,6 +13,7 @@ export interface Filter {
   densityMax: number | null;
   crystalSystems: string[];
   dimensionalities: string[];
+  batteryFamilies: string[];
   limit: number;
   offset: number;
 }
@@ -94,6 +95,7 @@ export const emptyFilter = (): Filter => ({
   densityMax: null,
   crystalSystems: [],
   dimensionalities: [],
+  batteryFamilies: [],
   limit: 200,
   offset: 0,
 });

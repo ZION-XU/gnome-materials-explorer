@@ -17,3 +17,9 @@ export const getStructure = (materialId: string): Promise<Structure> =>
 
 export const exportCif = (materialId: string): Promise<ExportedFile> =>
   invoke<ExportedFile>("export_cif", { materialId });
+
+export const exportPoscar = (materialId: string): Promise<ExportedFile> =>
+  invoke<ExportedFile>("export_poscar", { materialId });
+
+export const exportQeInput = (materialId: string): Promise<ExportedFile> =>
+  invoke<ExportedFile>("export_qe_input", { materialId });

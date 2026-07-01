@@ -7,8 +7,14 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { exportCif as exportCifFile, getStructure } from "../api";
-import type { MaterialRow, Structure } from "../types";
+import {
+  exportCif as exportCifFile,
+  exportPoscar,
+  exportQeInput,
+  getStructure,
+} from "../api";
+import { assessBatteryCandidate } from "../battery";
+import type { ExportedFile, MaterialRow, Structure } from "../types";
 
 const CrystalViewer = lazy(() =>
   import("./CrystalViewer").then((module) => ({ default: module.CrystalViewer })),
@@ -40,10 +46,11 @@ export function DetailPanel({ m, onClose, onExport }: Props) {
   const [structureLoading, setStructureLoading] = useState(false);
   const [structureError, setStructureError] = useState<string | null>(null);
   const [viewerRequested, setViewerRequested] = useState(false);
-  const [cifExporting, setCifExporting] = useState(false);
-  const [cifExportMessage, setCifExportMessage] = useState<string | null>(null);
+  const [structureExporting, setStructureExporting] = useState<string | null>(null);
+  const [structureExportMessage, setStructureExportMessage] = useState<string | null>(null);
   const currentMaterialIdRef = useRef<string | null>(null);
   const requestSeqRef = useRef(0);
+  const battery = m ? assessBatteryCandidate(m) : null;
 
   useEffect(() => {
     currentMaterialIdRef.current = m?.materialId ?? null;
@@ -52,8 +59,8 @@ export function DetailPanel({ m, onClose, onExport }: Props) {
     setStructureError(null);
     setStructureLoading(false);
     setViewerRequested(false);
-    setCifExporting(false);
-    setCifExportMessage(null);
+    setStructureExporting(null);
+    setStructureExportMessage(null);
   }, [m?.materialId]);
 
   const loadStructure = useCallback(async () => {
@@ -80,26 +87,30 @@ export function DetailPanel({ m, onClose, onExport }: Props) {
     }
   }, [m?.materialId, structureLoading]);
 
-  const exportCif = useCallback(async () => {
+  const exportStructureFile = useCallback(async (
+    kind: "cif" | "poscar" | "qe",
+    exporter: (materialId: string) => Promise<ExportedFile>,
+  ) => {
     const materialId = m?.materialId;
-    if (!materialId || cifExporting) return;
-    setCifExporting(true);
-    setCifExportMessage("正在导出 CIF…");
+    if (!materialId || structureExporting) return;
+    const label = kind === "cif" ? "CIF" : kind === "poscar" ? "POSCAR" : "Quantum ESPRESSO 输入";
+    setStructureExporting(kind);
+    setStructureExportMessage(`正在导出 ${label}…`);
     try {
-      const file = await exportCifFile(materialId);
+      const file = await exporter(materialId);
       if (currentMaterialIdRef.current === materialId) {
-        setCifExportMessage(`已导出：${file.path}`);
+        setStructureExportMessage(`已导出：${file.path}`);
       }
     } catch (e) {
       if (currentMaterialIdRef.current === materialId) {
-        setCifExportMessage(`导出失败：${String(e)}`);
+        setStructureExportMessage(`导出失败：${String(e)}`);
       }
     } finally {
       if (currentMaterialIdRef.current === materialId) {
-        setCifExporting(false);
+        setStructureExporting(null);
       }
     }
-  }, [m?.materialId, cifExporting]);
+  }, [m?.materialId, structureExporting]);
 
   if (!m) {
     return <div className="detail empty">点击结果行查看材料详情</div>;
@@ -123,12 +134,27 @@ export function DetailPanel({ m, onClose, onExport }: Props) {
             {structureError && (
               <button onClick={loadStructure} disabled={structureLoading}>重试</button>
             )}
-            <button onClick={exportCif} disabled={cifExporting}>
-              {cifExporting ? "导出中…" : "导出 CIF"}
+            <button
+              onClick={() => exportStructureFile("cif", exportCifFile)}
+              disabled={structureExporting !== null}
+            >
+              {structureExporting === "cif" ? "导出中…" : "导出 CIF"}
+            </button>
+            <button
+              onClick={() => exportStructureFile("poscar", exportPoscar)}
+              disabled={structureExporting !== null}
+            >
+              {structureExporting === "poscar" ? "导出中…" : "导出 POSCAR"}
+            </button>
+            <button
+              onClick={() => exportStructureFile("qe", exportQeInput)}
+              disabled={structureExporting !== null}
+            >
+              {structureExporting === "qe" ? "导出中…" : "导出 QE"}
             </button>
           </div>
         </div>
-        {cifExportMessage && <div className="structure-status">{cifExportMessage}</div>}
+        {structureExportMessage && <div className="structure-status">{structureExportMessage}</div>}
         {viewerRequested ? (
           <Suspense fallback={<div className="viewer-loading">加载 3D 组件中…</div>}>
             <CrystalViewer
@@ -153,6 +179,27 @@ export function DetailPanel({ m, onClose, onExport }: Props) {
           </div>
         )}
       </section>
+
+      {battery && battery.families.length > 0 && (
+        <section className="battery-card">
+          <div className="battery-head">
+            <span>固态电池候选判断</span>
+            <span className={`score-pill score-${battery.score}`}>{battery.scoreLabel}</span>
+          </div>
+          <div className="battery-families">
+            {battery.families.map((family) => (
+              <span key={family.id} className="battery-tag" title={family.desc}>
+                {family.name}
+              </span>
+            ))}
+          </div>
+          <ul className="battery-reasons">
+            {battery.reasons.map((reason) => (
+              <li key={reason}>{reason}</li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <div className="drows">
         <Row k="Material ID" v={<span className="mono">{m.materialId}</span>} />
